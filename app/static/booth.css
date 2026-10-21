@@ -1,0 +1,50 @@
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  background: #111;
+  color: #eee;
+}
+
+main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1rem;
+  text-align: center;
+}
+
+.stage video,
+.stage canvas {
+  width: 100%;
+  border-radius: 8px;
+  background: #000;
+}
+
+/* Mirror the live preview so it behaves like a mirror; the captured photo is not mirrored. */
+.stage video {
+  transform: scaleX(-1);
+}
+
+#status {
+  font-size: 1.4rem;
+  min-height: 2em;
+}
+
+button {
+  font-size: 1.4rem;
+  padding: 0.8em 2em;
+  border: 0;
+  border-radius: 8px;
+  background: #2b6cb0;
+  color: #fff;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+kbd {
+  font-size: 0.7em;
+  opacity: 0.7;
+}

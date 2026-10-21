@@ -1,0 +1,11 @@
+fastapi>=0.110
+uvicorn>=0.29
+numpy>=1.26
+pillow>=10.0
+opencv-python-headless>=4.9
+insightface>=0.7.3
+onnxruntime>=1.17
+pytest>=8.0
+httpx>=0.27
+# scipy (pulled in by insightface) 1.15.x wheels fail to load on recent macOS arm64
+scipy<1.15

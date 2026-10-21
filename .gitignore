@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.db
+
+# Volunteer photos and contact details never go in git.
+gallery/*
+!gallery/gallery.example.csv
+!gallery/README.md

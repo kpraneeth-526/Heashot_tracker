@@ -7,3 +7,4 @@ __pycache__/
 gallery/*
 !gallery/gallery.example.csv
 !gallery/README.md
+.DS_Store

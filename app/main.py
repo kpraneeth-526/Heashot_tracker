@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import face
-from app.matcher import build_gallery, load_gallery, wipe_gallery
+from app.matcher import build_gallery, decide, load_gallery, match, wipe_gallery
 
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
@@ -41,6 +41,16 @@ app = FastAPI(title="Headshot Auto-Match", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
+@app.middleware("http")
+async def revalidate_pages(request: Request, call_next):
+    # Make the browser check for a newer booth page/script on every load, so
+    # it never runs a stale booth.js against a changed /capture response.
+    response = await call_next(request)
+    if request.method == "GET":
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 @app.get("/")
 def booth_page():
     return FileResponse(STATIC_DIR / "index.html")
@@ -61,6 +71,27 @@ async def capture_photo(request: Request):
     except face.FaceError as e:
         raise HTTPException(400, str(e))
 
-    faces = face.detect_faces(img)
-    height, width = img.shape[:2]
-    return {"faces": len(faces), "width": width, "height": height}
+    try:
+        found = face.check_quality(img)
+    except face.QualityError as e:
+        return {"ok": False, "reason": str(e)}
+
+    # The name only goes to the log for now; the "Hi X, is this you?" screen
+    # comes in Week 2. Emails are never logged.
+    gallery = request.app.state.gallery
+    if gallery is None:
+        print("capture: good photo, no gallery loaded")
+    else:
+        decision = decide(match(gallery, found.normed_embedding))
+        print(f"capture: {_describe(decision)}")
+    return {"ok": True}
+
+
+def _describe(decision) -> str:
+    def fmt(score):
+        return "-" if score is None else f"{score:.3f}"
+
+    scores = f"score={fmt(decision.score)} runner_up={fmt(decision.runner_up)}"
+    if decision.entry is None:
+        return f"no match ({decision.reason}) {scores}"
+    return f"matched {decision.entry.name} {scores}"

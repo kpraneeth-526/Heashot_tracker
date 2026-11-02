@@ -9,6 +9,11 @@ import numpy as np
 
 REQUIRED_COLUMNS = ("name", "email", "filename")
 
+# Match decision thresholds (cosine similarity). Starting values; the Week 2
+# evaluation picks the real ones so the wrong-match rate is ~0%.
+MIN_SCORE = 0.40  # best match must score at least this
+MIN_MARGIN = 0.08  # ...and beat the second best by at least this
+
 
 @dataclass(frozen=True)
 class GalleryEntry:
@@ -25,6 +30,23 @@ class Gallery:
 
     def __len__(self) -> int:
         return len(self.entries)
+
+
+@dataclass(frozen=True)
+class Candidate:
+    entry: GalleryEntry
+    score: float
+
+
+@dataclass(frozen=True)
+class Decision:
+    """`entry` is the matched student, or None when the booth should fall
+    back to manual entry; `reason` says why."""
+
+    entry: GalleryEntry | None
+    score: float | None
+    runner_up: float | None
+    reason: str
 
 
 def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
@@ -100,6 +122,34 @@ def build_gallery(
 
     embeddings = np.stack(vectors) if vectors else np.empty((0, 0), dtype=np.float32)
     return Gallery(kept, embeddings, skipped)
+
+
+def match(gallery: Gallery, embedding: np.ndarray, top_k: int = 2) -> list[Candidate]:
+    """The `top_k` most similar gallery entries, best first."""
+    if len(gallery) == 0:
+        return []
+    vec = np.asarray(embedding, dtype=np.float32)
+    scores = gallery.embeddings @ (vec / np.linalg.norm(vec))
+    order = np.argsort(-scores)[:top_k]
+    return [Candidate(gallery.entries[i], float(scores[i])) for i in order]
+
+
+def decide(
+    candidates: list[Candidate],
+    min_score: float = MIN_SCORE,
+    min_margin: float = MIN_MARGIN,
+) -> Decision:
+    """Accept the best candidate only if it is both a strong match and clearly
+    ahead of the second best; otherwise fall back to manual entry."""
+    if not candidates:
+        return Decision(None, None, None, "gallery is empty")
+    best = candidates[0]
+    runner_up = candidates[1].score if len(candidates) > 1 else None
+    if best.score < min_score:
+        return Decision(None, best.score, runner_up, "score below minimum")
+    if runner_up is not None and best.score - runner_up < min_margin:
+        return Decision(None, best.score, runner_up, "too close to second best")
+    return Decision(best.entry, best.score, runner_up, "match")
 
 
 def wipe_gallery(gallery: Gallery) -> None:

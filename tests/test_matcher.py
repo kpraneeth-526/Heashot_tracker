@@ -1,7 +1,17 @@
 import numpy as np
 import pytest
 
-from app.matcher import build_gallery, cosine_similarity, load_gallery, wipe_gallery
+from app.matcher import (
+    Candidate,
+    Gallery,
+    GalleryEntry,
+    build_gallery,
+    cosine_similarity,
+    decide,
+    load_gallery,
+    match,
+    wipe_gallery,
+)
 
 
 def write_gallery(tmp_path, rows, photos=("a.jpg", "b.jpg")):
@@ -86,3 +96,49 @@ def test_wipe_gallery_zeroes_embeddings(tmp_path):
     assert not buffer.any()
     assert len(gallery) == 0
     assert gallery.embeddings.size == 0
+
+
+def make_gallery(*vectors):
+    entries = [GalleryEntry(f"Student {i}", f"s{i}@example.edu", None) for i in range(len(vectors))]
+    embeddings = np.array(vectors, dtype=np.float32)
+    embeddings /= np.linalg.norm(embeddings, axis=1, keepdims=True)
+    return Gallery(entries, embeddings)
+
+
+def test_match_ranks_best_first():
+    gallery = make_gallery([1.0, 0.0], [0.6, 0.8], [0.0, 1.0])
+    candidates = match(gallery, np.array([0.0, 2.0]))
+    assert [c.entry.name for c in candidates] == ["Student 2", "Student 1"]
+    assert candidates[0].score == pytest.approx(1.0)
+    assert candidates[1].score == pytest.approx(0.8)
+
+
+def test_match_empty_gallery():
+    assert match(Gallery([], np.empty((0, 0), dtype=np.float32)), np.ones(2)) == []
+
+
+def candidates(*scores):
+    return [Candidate(GalleryEntry(f"S{i}", f"s{i}@example.edu", None), s) for i, s in enumerate(scores)]
+
+
+def test_decide_accepts_strong_clear_match():
+    decision = decide(candidates(0.7, 0.3), min_score=0.4, min_margin=0.1)
+    assert decision.entry.name == "S0"
+    assert (decision.score, decision.runner_up) == (0.7, 0.3)
+
+
+def test_decide_rejects_weak_match():
+    decision = decide(candidates(0.35, 0.1), min_score=0.4, min_margin=0.1)
+    assert decision.entry is None
+    assert decision.reason == "score below minimum"
+
+
+def test_decide_rejects_close_second():
+    decision = decide(candidates(0.7, 0.65), min_score=0.4, min_margin=0.1)
+    assert decision.entry is None
+    assert decision.reason == "too close to second best"
+
+
+def test_decide_single_entry_gallery_and_empty():
+    assert decide(candidates(0.7), min_score=0.4, min_margin=0.1).entry.name == "S0"
+    assert decide([]).entry is None

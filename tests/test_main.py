@@ -1,19 +1,23 @@
 import io
 import os
 import tempfile
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
 from app import face
 from app.main import app
+from app.matcher import Gallery, GalleryEntry
 
 
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.delenv("GALLERY_CSV", raising=False)
-    monkeypatch.setattr(face, "detect_faces", lambda img: [object()])
+    good_face = SimpleNamespace(normed_embedding=np.array([1.0, 0.0], dtype=np.float32))
+    monkeypatch.setattr(face, "check_quality", lambda img: good_face)
     with TestClient(app) as c:
         yield c
 
@@ -30,10 +34,38 @@ def test_booth_page_served(client):
     assert "Headshot Booth" in res.text
 
 
-def test_capture_counts_faces(client):
-    res = client.post("/capture", content=jpeg_bytes(), headers={"Content-Type": "image/jpeg"})
+def post_photo(client):
+    return client.post("/capture", content=jpeg_bytes(), headers={"Content-Type": "image/jpeg"})
+
+
+def test_capture_accepts_good_photo(client):
+    res = post_photo(client)
     assert res.status_code == 200
-    assert res.json() == {"faces": 1, "width": 640, "height": 480}
+    assert res.json() == {"ok": True}
+
+
+def test_capture_reports_quality_problem(client, monkeypatch):
+    def blurry(img):
+        raise face.QualityError("The photo is blurry. Hold still and retake.")
+
+    monkeypatch.setattr(face, "check_quality", blurry)
+    res = post_photo(client)
+    assert res.status_code == 200
+    assert res.json() == {"ok": False, "reason": "The photo is blurry. Hold still and retake."}
+
+
+def test_capture_logs_matched_name_not_email(client, capsys):
+    entries = [
+        GalleryEntry("Ada Lovelace", "ada@example.edu", None),
+        GalleryEntry("Alan Turing", "alan@example.edu", None),
+    ]
+    embeddings = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+    client.app.state.gallery = Gallery(entries, embeddings)
+
+    assert post_photo(client).json() == {"ok": True}
+    out = capsys.readouterr().out
+    assert "matched Ada Lovelace" in out
+    assert "@" not in out
 
 
 def test_capture_rejects_empty_and_garbage(client):

@@ -6,6 +6,7 @@ import pytest
 from app.matcher import (
     Gallery,
     GalleryEntry,
+    add_to_gallery,
     build_gallery,
     cosine_similarity,
     decide,
@@ -145,3 +146,22 @@ def test_decide_needs_score_and_margin():
 def test_decide_empty_gallery():
     d = decide(match(np.array([1.0]), make_gallery()))
     assert d.entry is None and d.reason == "empty gallery"
+
+
+def test_add_to_gallery_appends_and_replaces_by_email():
+    gallery = make_gallery([1, 0])
+    old_buffer = gallery.embeddings
+    add_to_gallery(gallery, GalleryEntry("New", "new@example.edu", None), np.array([0.0, 2.0]))
+    assert [e.name for e in gallery.entries] == ["P0", "New"]
+    np.testing.assert_allclose(gallery.embeddings[1], [0, 1])
+    assert not old_buffer.any()  # previous copy was zeroed
+
+    add_to_gallery(gallery, GalleryEntry("New Again", "NEW@example.edu", None), np.array([1.0, 1.0]))
+    assert [e.name for e in gallery.entries] == ["P0", "New Again"]
+    assert match(np.array([1.0, 1.0]), gallery).best.name == "New Again"
+
+
+def test_add_to_empty_gallery():
+    gallery = make_gallery()
+    add_to_gallery(gallery, GalleryEntry("A", "a@example.edu", None), np.array([3.0, 4.0]))
+    np.testing.assert_allclose(gallery.embeddings, [[0.6, 0.8]])

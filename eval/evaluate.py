@@ -37,6 +37,18 @@ DEFAULT_CACHE = Path("data/lfw_embeddings.npz")
 SWEEP_SCORES = [0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60]
 SWEEP_MARGINS = [0.0, 0.05, 0.10, 0.15]
 
+# LFW labelling errors found by inspecting "wrong" matches: each of these
+# folders actually shows someone who also has their own folder, so a match to
+# them is not a real mistake. Excluded from every split.
+LFW_MISLABELLED = {
+    "Gabrielle_Rose",                  # identical photo to Martha_Bowen_0002
+    "Carlos_Ruckauf",                  # photo is Eduardo Duhalde
+    "Anja_Paerson",                    # photo is Janica Kostelic
+    "Yingfan_Wang",                    # same person as Wang_Yingfan
+    "Mireya_Elisa_Moscoso_Rodriguez",  # same person as Mireya_Moscoso
+    "Cristina_Kirchner",               # same person as Cristina_Fernandez
+}
+
 
 def list_people(lfw_dir: Path) -> dict[str, list[str]]:
     """person -> sorted photo paths relative to lfw_dir."""
@@ -105,6 +117,7 @@ def save_cache(cache: Path, store) -> None:
 
 def build_split(people, store, args):
     rng = random.Random(args.seed)
+    people = {p: photos for p, photos in people.items() if p not in LFW_MISLABELLED}
     multi = [p for p, photos in people.items() if len(photos) >= 2]
     singles = [p for p, photos in people.items() if len(photos) == 1]
     rng.shuffle(multi)

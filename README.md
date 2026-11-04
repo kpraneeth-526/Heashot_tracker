@@ -27,6 +27,10 @@ Download LFW (~180 MB) into `data/`, which git ignores:
 
 See `gallery/README.md` for the gallery format.
 
+To test with your own face, open http://localhost:8000/enroll, enter a name and
+email, and take a reference photo. Then use the booth at http://localhost:8000.
+Registrations are kept in memory only and are gone when the app stops.
+
 ## Accuracy on LFW
 
     .venv/bin/python -m eval.evaluate                  # default thresholds

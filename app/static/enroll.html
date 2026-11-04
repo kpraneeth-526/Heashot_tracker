@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Register for Headshots</title>
+  <link rel="stylesheet" href="/static/booth.css">
+</head>
+<body>
+  <main>
+    <h1>Register for Headshots</h1>
+    <p class="note">Testing only. Your photo is not saved; the face data is kept in memory
+      and erased when the booth stops.</p>
+    <div class="fields">
+      <input id="name" type="text" placeholder="Name" autocomplete="off">
+      <input id="email" type="email" placeholder="Email" autocomplete="off">
+    </div>
+    <div class="stage">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="canvas" hidden></canvas>
+    </div>
+    <p id="status" role="status">Starting camera…</p>
+    <div class="buttons">
+      <button id="capture" disabled>Take photo</button>
+      <button id="retake" hidden>Register another</button>
+    </div>
+    <p><a href="/">Go to the booth</a></p>
+  </main>
+  <script src="/static/camera.js"></script>
+  <script src="/static/enroll.js"></script>
+</body>
+</html>

@@ -62,9 +62,34 @@ def test_capture_reports_quality_problem(client, monkeypatch):
     assert post_photo(client).json() == {"ok": False, "reason": "Please hold still."}
 
 
-def test_capture_without_gallery_falls_back(client):
+def test_capture_with_empty_gallery_falls_back(client):
     assert post_photo(client).json() == {
-        "ok": True, "match": None, "fallback": "no gallery loaded"}
+        "ok": True, "match": None, "fallback": "empty gallery"}
+
+
+def enroll(client, name, email):
+    return client.post("/enroll", content=jpeg_bytes(), headers={
+        "Content-Type": "image/jpeg", "X-Name": name, "X-Email": email})
+
+
+def test_enroll_then_match(client):
+    assert enroll(client, "Grace%20Hopper", "grace%40example.edu").json() == {
+        "ok": True, "name": "Grace Hopper", "gallery_size": 1}
+    assert post_photo(client).json() == {"ok": True, "match": {"name": "Grace Hopper"}}
+    assert client.app.state.gallery.entries[0].email == "grace@example.edu"
+
+
+def test_enroll_requires_name_and_email(client):
+    assert enroll(client, "", "grace@example.edu").status_code == 400
+    assert enroll(client, "Grace", "not-an-email").status_code == 400
+
+
+def test_enroll_reports_quality_problem(client, monkeypatch):
+    monkeypatch.setattr(face, "check_quality",
+                        lambda img, faces: face.Quality(False, "Please step closer to the camera."))
+    assert enroll(client, "Grace", "grace@example.edu").json() == {
+        "ok": False, "reason": "Please step closer to the camera."}
+    assert len(client.app.state.gallery) == 0
 
 
 def test_capture_matches_and_sends_only_the_name(client):
@@ -98,3 +123,8 @@ def test_capture_writes_nothing_to_disk(client):
     assert res.status_code == 200
     assert set(os.listdir(tmpdir)) <= before
     assert set(os.listdir(".")) <= cwd_before
+
+
+def test_pages_and_scripts_are_not_cached(client):
+    for path in ("/", "/enroll", "/static/booth.js", "/static/camera.js"):
+        assert client.get(path).headers["Cache-Control"] == "no-cache"

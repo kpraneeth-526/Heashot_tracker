@@ -24,7 +24,7 @@ def quiet_matmul():
 class GalleryEntry:
     name: str
     email: str
-    photo: Path
+    photo: Path | None  # None for people registered at the booth (photo not kept)
 
 
 @dataclass
@@ -35,6 +35,23 @@ class Gallery:
 
     def __len__(self) -> int:
         return len(self.entries)
+
+
+def empty_gallery() -> Gallery:
+    return Gallery([], np.empty((0, 0), dtype=np.float32))
+
+
+def add_to_gallery(gallery: Gallery, entry: GalleryEntry, embedding: np.ndarray) -> None:
+    """Add one person, replacing anyone already registered with the same email."""
+    vec = np.asarray(embedding, dtype=np.float32)
+    vec = vec / np.linalg.norm(vec)
+    keep = [i for i, e in enumerate(gallery.entries) if e.email.lower() != entry.email.lower()]
+    old = gallery.embeddings
+    rows = [old[i] for i in keep] + [vec]
+    gallery.entries[:] = [gallery.entries[i] for i in keep] + [entry]
+    gallery.embeddings = np.stack(rows)
+    if old.size:
+        old.fill(0)  # don't leave the previous copy of everyone's embedding around
 
 
 def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:

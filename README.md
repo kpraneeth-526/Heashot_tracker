@@ -1,7 +1,8 @@
 # Headshot Auto-Match
 
 Prototype booth that matches a headshot to a registered student and emails it
-to them. Volunteers and consented photos only.
+to them. Development uses the public LFW dataset (Labeled Faces in the Wild)
+instead of real students.
 
 ## Setup
 
@@ -11,6 +12,12 @@ to them. Volunteers and consented photos only.
 The first face-model call downloads InsightFace `buffalo_l` (~280 MB) to
 `~/.insightface/models`.
 
+Download LFW (~180 MB) into `data/`, which git ignores:
+
+    mkdir -p data
+    curl -L -o data/lfw.tgz https://ndownloader.figshare.com/files/5976018
+    tar -xzf data/lfw.tgz -C data && rm data/lfw.tgz
+
 ## Run
 
     .venv/bin/pytest                                   # tests
@@ -19,3 +26,17 @@ The first face-model call downloads InsightFace `buffalo_l` (~280 MB) to
     GALLERY_CSV=gallery/gallery.csv .venv/bin/uvicorn app.main:app   # with gallery
 
 See `gallery/README.md` for the gallery format.
+
+## Accuracy on LFW
+
+    .venv/bin/python -m eval.evaluate                  # default thresholds
+    .venv/bin/python -m eval.evaluate --sweep          # compare thresholds
+    .venv/bin/python -m eval.evaluate --distractors    # bigger, harder gallery
+
+The first run embeds every photo and caches the result in
+`data/lfw_embeddings.npz` (about 40 minutes on a laptop); later runs take seconds.
+
+To try the booth against LFW people:
+
+    .venv/bin/python -m eval.make_lfw_gallery --people 200
+    GALLERY_CSV=gallery/lfw_gallery.csv .venv/bin/uvicorn app.main:app

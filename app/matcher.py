@@ -9,6 +9,16 @@ import numpy as np
 
 REQUIRED_COLUMNS = ("name", "email", "filename")
 
+# A match needs a high enough score AND a clear lead over the runner-up.
+# Starting points; tune with `python -m eval.evaluate --sweep`.
+MIN_SCORE = 0.45
+MIN_MARGIN = 0.10
+
+# NumPy 2.x on Apple Silicon (Accelerate BLAS) emits bogus divide-by-zero /
+# overflow warnings from matmul even though the results are correct.
+def quiet_matmul():
+    return np.errstate(divide="ignore", over="ignore", invalid="ignore")
+
 
 @dataclass(frozen=True)
 class GalleryEntry:
@@ -100,6 +110,51 @@ def build_gallery(
 
     embeddings = np.stack(vectors) if vectors else np.empty((0, 0), dtype=np.float32)
     return Gallery(kept, embeddings, skipped)
+
+
+@dataclass(frozen=True)
+class MatchResult:
+    best: GalleryEntry | None
+    best_score: float
+    second_score: float  # -1.0 when the gallery has fewer than two people
+
+    @property
+    def margin(self) -> float:
+        return self.best_score - self.second_score
+
+
+@dataclass(frozen=True)
+class Decision:
+    entry: GalleryEntry | None  # None means fall back to manual email entry
+    reason: str
+    result: MatchResult
+
+
+def match(embedding: np.ndarray, gallery: Gallery) -> MatchResult:
+    """Best and second-best cosine similarity against the gallery."""
+    if len(gallery) == 0:
+        return MatchResult(None, -1.0, -1.0)
+    query = np.asarray(embedding, dtype=np.float32)
+    with quiet_matmul():
+        scores = gallery.embeddings @ (query / np.linalg.norm(query))
+    if len(scores) == 1:
+        return MatchResult(gallery.entries[0], float(scores[0]), -1.0)
+    second, best = np.argpartition(scores, -2)[-2:]
+    if scores[second] > scores[best]:
+        best, second = second, best
+    return MatchResult(gallery.entries[best], float(scores[best]), float(scores[second]))
+
+
+def decide(
+    result: MatchResult, min_score: float = MIN_SCORE, min_margin: float = MIN_MARGIN
+) -> Decision:
+    if result.best is None:
+        return Decision(None, "empty gallery", result)
+    if result.best_score < min_score:
+        return Decision(None, "score too low", result)
+    if result.margin < min_margin:
+        return Decision(None, "too close to another person", result)
+    return Decision(result.best, "match", result)
 
 
 def wipe_gallery(gallery: Gallery) -> None:

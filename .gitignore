@@ -7,3 +7,6 @@ __pycache__/
 gallery/*
 !gallery/gallery.example.csv
 !gallery/README.md
+
+# Public datasets (LFW) and cached embeddings; download locally.
+data/

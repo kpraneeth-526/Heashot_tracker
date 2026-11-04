@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import face
-from app.matcher import build_gallery, load_gallery, wipe_gallery
+from app.matcher import build_gallery, decide, load_gallery, match, wipe_gallery
 
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
@@ -26,8 +26,8 @@ async def lifespan(app: FastAPI):
     if csv_path:
         gallery = build_gallery(load_gallery(csv_path))
         for entry, reason in gallery.skipped:
-            print(f"gallery: skipped {entry.photo.name}: {reason}")
-        print(f"gallery: {len(gallery)} students loaded")
+            print(f"gallery: skipped {entry.photo.name}: {reason}", flush=True)
+        print(f"gallery: {len(gallery)} students loaded", flush=True)
         app.state.gallery = gallery
     try:
         yield
@@ -62,5 +62,15 @@ async def capture_photo(request: Request):
         raise HTTPException(400, str(e))
 
     faces = face.detect_faces(img)
-    height, width = img.shape[:2]
-    return {"faces": len(faces), "width": width, "height": height}
+    quality = face.check_quality(img, faces)
+    if not quality.ok:
+        return {"ok": False, "reason": quality.reason}
+
+    gallery = request.app.state.gallery
+    if gallery is None:
+        return {"ok": True, "match": None, "fallback": "no gallery loaded"}
+    decision = decide(match(quality.face.normed_embedding, gallery))
+    if decision.entry is None:
+        return {"ok": True, "match": None, "fallback": decision.reason}
+    # Only the name goes to the browser; the email stays on the server.
+    return {"ok": True, "match": {"name": decision.entry.name}}

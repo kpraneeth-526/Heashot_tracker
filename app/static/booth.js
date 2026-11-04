@@ -51,8 +51,9 @@ async function capture() {
     });
     const body = await res.json();
     if (!res.ok) throw new Error(body.detail || res.statusText);
-    const n = body.faces;
-    setStatus(n === 1 ? "Got it: one face found." : `Found ${n} faces — please retake with just one person.`);
+    if (!body.ok) setStatus(body.reason);
+    else if (body.match) setStatus(`Hi ${body.match.name}, is this you?`);
+    else setStatus("We couldn't find you automatically. Please enter your email.");
   } catch (err) {
     setStatus(`Something went wrong: ${err.message}`);
   }

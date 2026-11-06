@@ -8,6 +8,7 @@ from app.matcher import (
     GalleryEntry,
     add_to_gallery,
     build_gallery,
+    cached_embedder,
     cosine_similarity,
     decide,
     load_gallery,
@@ -165,3 +166,19 @@ def test_add_to_empty_gallery():
     gallery = make_gallery()
     add_to_gallery(gallery, GalleryEntry("A", "a@example.edu", None), np.array([3.0, 4.0]))
     np.testing.assert_allclose(gallery.embeddings, [[0.6, 0.8]])
+
+
+def test_cached_embedder_reuses_saved_embeddings(tmp_path, monkeypatch):
+    npz = tmp_path / "cache.npz"
+    np.savez(npz, paths=np.array(["Ada/Ada_0001.jpg", "Bob/Bob_0001.jpg"]),
+             emb=np.array([[1.0, 0], [0, 0]], dtype=np.float32),
+             has_face=np.array([True, False]), status=np.array(["ok", "No face found."]))
+    computed = []
+    monkeypatch.setattr("app.matcher.embed_photo", lambda p: computed.append(p.name) or np.ones(2))
+
+    embed = cached_embedder(npz)
+    np.testing.assert_array_equal(embed(Path("anywhere/Ada/Ada_0001.jpg")), [1, 0])
+    assert computed == []  # came from the file, model not run
+    embed(Path("x/Bob/Bob_0001.jpg"))  # saved without a face: computed normally
+    embed(Path("x/Cy/Cy_0001.jpg"))  # not in the file: computed normally
+    assert computed == ["Bob_0001.jpg", "Cy_0001.jpg"]

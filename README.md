@@ -40,7 +40,8 @@ Registrations are kept in memory only and are gone when the app stops.
 The first run embeds every photo and caches the result in
 `data/lfw_embeddings.npz` (about 40 minutes on a laptop); later runs take seconds.
 
-To try the booth against LFW people:
+To try the booth against all of LFW (about 5,700 people, starts in seconds
+by reusing the saved embeddings):
 
-    .venv/bin/python -m eval.make_lfw_gallery --people 200
-    GALLERY_CSV=gallery/lfw_gallery.csv .venv/bin/uvicorn app.main:app
+    .venv/bin/python -m eval.make_lfw_gallery --people 0
+    GALLERY_CSV=gallery/lfw_gallery.csv GALLERY_CACHE=data/lfw_embeddings.npz .venv/bin/uvicorn app.main:app

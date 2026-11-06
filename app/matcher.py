@@ -101,15 +101,32 @@ def load_gallery(csv_path: str | Path) -> list[GalleryEntry]:
     return entries
 
 
-def _embed_photo(path: Path) -> np.ndarray:
+def embed_photo(path: Path) -> np.ndarray:
     from app.face import compute_embedding, load_image
 
     return compute_embedding(load_image(path))
 
 
+def cached_embedder(npz_path: str | Path) -> Callable[[Path], np.ndarray]:
+    """An `embed` function for build_gallery that reuses saved embeddings
+    (the file eval.evaluate writes, keyed "Person/Person_0001.jpg") instead of
+    running the face model again. Photos missing from the file are embedded
+    as usual. Only for public test data such as LFW: real students' face data
+    is never written to disk.
+    """
+    data = np.load(npz_path)
+    saved = {str(p): e for p, e, has in zip(data["paths"], data["emb"], data["has_face"]) if has}
+
+    def embed(path: Path) -> np.ndarray:
+        key = f"{path.parent.name}/{path.name}"
+        return saved[key] if key in saved else embed_photo(path)
+
+    return embed
+
+
 def build_gallery(
     entries: list[GalleryEntry],
-    embed: Callable[[Path], np.ndarray] = _embed_photo,
+    embed: Callable[[Path], np.ndarray] = embed_photo,
 ) -> Gallery:
     """Embed each reference photo. Photos that fail (no face, two faces, ...)
     are skipped and reported; those students fall back to manual entry."""

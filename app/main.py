@@ -2,6 +2,10 @@
 
     uvicorn app.main:app --reload            # empty gallery; register at /enroll
     GALLERY_CSV=gallery/gallery.csv uvicorn app.main:app   # preload a gallery
+
+    # LFW gallery, reusing the embeddings saved by eval.evaluate (fast start)
+    GALLERY_CSV=gallery/lfw_gallery.csv GALLERY_CACHE=data/lfw_embeddings.npz \\
+        uvicorn app.main:app
 """
 
 import os
@@ -16,8 +20,10 @@ from fastapi.staticfiles import StaticFiles
 from app import face
 from app.matcher import (
     GalleryEntry,
+    embed_photo,
     add_to_gallery,
     build_gallery,
+    cached_embedder,
     decide,
     empty_gallery,
     load_gallery,
@@ -34,7 +40,9 @@ async def lifespan(app: FastAPI):
     app.state.gallery = empty_gallery()
     csv_path = os.environ.get("GALLERY_CSV")
     if csv_path:
-        gallery = build_gallery(load_gallery(csv_path))
+        cache_path = os.environ.get("GALLERY_CACHE")
+        embed = cached_embedder(cache_path) if cache_path else embed_photo
+        gallery = build_gallery(load_gallery(csv_path), embed)
         for entry, reason in gallery.skipped:
             print(f"gallery: skipped {entry.photo.name}: {reason}", flush=True)
         print(f"gallery: {len(gallery)} students loaded", flush=True)

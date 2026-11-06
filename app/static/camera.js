@@ -1,4 +1,6 @@
 // Shared webcam capture for the booth (/) and registration (/enroll) pages.
+// If the page has an #upload button and #file input, photos can also be
+// chosen from the computer.
 //
 // setupCamera({
 //   endpoint: "/capture",          // where the JPEG is POSTed
@@ -12,7 +14,12 @@ function setupCamera({ endpoint, headers = () => ({}), check = () => null, descr
   const statusEl = document.getElementById("status");
   const captureBtn = document.getElementById("capture");
   const retakeBtn = document.getElementById("retake");
-  const prompt = "Look at the camera and press Take photo.";
+  const uploadBtn = document.getElementById("upload");
+  const fileInput = document.getElementById("file");
+  const prompt = uploadBtn
+    ? "Look at the camera and press Take photo, or upload a photo."
+    : "Look at the camera and press Take photo.";
+  let cameraReady = false;
 
   function setStatus(text) {
     statusEl.textContent = text;
@@ -25,10 +32,11 @@ function setupCamera({ endpoint, headers = () => ({}), check = () => null, descr
         audio: false,
       });
       await video.play();
+      cameraReady = true;
       captureBtn.disabled = false;
       setStatus(prompt);
     } catch (err) {
-      setStatus(`Camera unavailable: ${err.message}`);
+      setStatus(`Camera unavailable: ${err.message}` + (uploadBtn ? " You can still upload a photo." : ""));
     }
   }
 
@@ -37,8 +45,19 @@ function setupCamera({ endpoint, headers = () => ({}), check = () => null, descr
     video.hidden = false;
     retakeBtn.hidden = true;
     captureBtn.hidden = false;
-    captureBtn.disabled = false;
+    captureBtn.disabled = !cameraReady;
+    if (uploadBtn) uploadBtn.hidden = uploadBtn.disabled = false;
     setStatus(prompt);
+  }
+
+  // Draw a picture onto the canvas, shrunk to at most maxSide pixels.
+  function drawToCanvas(source, width, height, maxSide = Infinity) {
+    const scale = Math.min(1, maxSide / Math.max(width, height));
+    canvas.width = Math.round(width * scale);
+    canvas.height = Math.round(height * scale);
+    canvas.getContext("2d").drawImage(source, 0, 0, canvas.width, canvas.height);
+    video.hidden = true;
+    canvas.hidden = false;
   }
 
   async function capture() {
@@ -48,13 +67,37 @@ function setupCamera({ endpoint, headers = () => ({}), check = () => null, descr
       setStatus(problem);
       return;
     }
-    captureBtn.disabled = true;
+    drawToCanvas(video, video.videoWidth, video.videoHeight);
+    await send();
+  }
 
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext("2d").drawImage(video, 0, 0);
-    video.hidden = true;
-    canvas.hidden = false;
+  // Uploaded files are re-encoded as JPEG in the browser, which also converts
+  // iPhone HEIC photos (Safari can read them; the server can't) and shrinks
+  // large phone photos. EXIF rotation is applied by the browser.
+  async function upload(file) {
+    const problem = check();
+    if (problem) {
+      setStatus(problem);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    try {
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      drawToCanvas(img, img.naturalWidth, img.naturalHeight, 1920);
+    } catch {
+      setStatus("Couldn't open that file. Please choose a JPG, PNG or HEIC photo.");
+      return;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+    await send();
+  }
+
+  async function send() {
+    captureBtn.disabled = true;
+    if (uploadBtn) uploadBtn.disabled = true;
     setStatus("Checking photo…");
 
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
@@ -71,11 +114,21 @@ function setupCamera({ endpoint, headers = () => ({}), check = () => null, descr
       setStatus(`Something went wrong: ${err.message}`);
     }
     captureBtn.hidden = true;
+    if (uploadBtn) uploadBtn.hidden = true;
     retakeBtn.hidden = false;
   }
 
   captureBtn.addEventListener("click", capture);
   retakeBtn.addEventListener("click", showLive);
+  if (uploadBtn) {
+    uploadBtn.disabled = false;
+    uploadBtn.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", () => {
+      const file = fileInput.files[0];
+      fileInput.value = ""; // so choosing the same file again still triggers
+      if (file) upload(file);
+    });
+  }
   document.addEventListener("keydown", (e) => {
     if (e.code !== "Space" || e.target.tagName === "INPUT") return;
     e.preventDefault();

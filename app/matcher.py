@@ -1,6 +1,7 @@
 """In-memory gallery of registered students and similarity scoring."""
 
 import csv
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -25,6 +26,7 @@ class GalleryEntry:
     name: str
     email: str
     photo: Path | None  # None for people registered at the booth (photo not kept)
+    uga_id: str = ""  # digits only; "" when unknown. Never sent to the browser.
 
 
 @dataclass
@@ -54,12 +56,18 @@ def add_to_gallery(gallery: Gallery, entry: GalleryEntry, embedding: np.ndarray)
         old.fill(0)  # don't leave the previous copy of everyone's embedding around
 
 
+def normalize_id(value: str) -> str:
+    """'811-123-4567' and '811 123 4567' both become '8111234567'."""
+    return re.sub(r"[\s-]", "", value)
+
+
 def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
 
 
 def load_gallery(csv_path: str | Path) -> list[GalleryEntry]:
-    """Read gallery.csv (name, email, filename) and validate every row.
+    """Read gallery.csv (name, email, filename, optional uga_id) and validate
+    every row.
 
     Filenames are resolved relative to the CSV's folder. All problems are
     collected and raised together so the whole file can be fixed in one pass.
@@ -69,6 +77,7 @@ def load_gallery(csv_path: str | Path) -> list[GalleryEntry]:
     entries: list[GalleryEntry] = []
     errors: list[str] = []
     seen_emails: set[str] = set()
+    seen_ids: set[str] = set()
 
     with csv_path.open(newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
@@ -89,12 +98,21 @@ def load_gallery(csv_path: str | Path) -> list[GalleryEntry]:
             if email.lower() in seen_emails:
                 errors.append(f"line {line}: duplicate email {email!r}")
                 continue
+            uga_id = normalize_id(row.get("uga_id") or "")
+            if uga_id and not uga_id.isdigit():
+                errors.append(f"line {line}: invalid uga_id {row['uga_id']!r}")
+                continue
+            if uga_id and uga_id in seen_ids:
+                errors.append(f"line {line}: duplicate uga_id")
+                continue
             photo = folder / filename
             if not photo.is_file():
                 errors.append(f"line {line}: photo not found: {filename}")
                 continue
             seen_emails.add(email.lower())
-            entries.append(GalleryEntry(name, email, photo))
+            if uga_id:
+                seen_ids.add(uga_id)
+            entries.append(GalleryEntry(name, email, photo, uga_id))
 
     if errors:
         raise ValueError(f"{csv_path}:\n  " + "\n  ".join(errors))

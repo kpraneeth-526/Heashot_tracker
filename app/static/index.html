@@ -16,10 +16,29 @@
     <p id="status" role="status">Starting camera…</p>
     <div class="buttons">
       <button id="capture" disabled>Take photo <kbd>Space</kbd></button>
-      <button id="upload" class="secondary" disabled>Upload photo</button>
-      <input id="file" type="file" accept="image/*" hidden>
       <button id="retake" hidden>Retake</button>
     </div>
+
+    <!-- After a photo: confirm the match, or find yourself on the roster. -->
+    <section id="confirm" hidden>
+      <div class="buttons">
+        <button id="yes">Yes, that's me</button>
+        <button id="not-me" class="secondary">Not me</button>
+      </div>
+    </section>
+    <section id="lookup" hidden>
+      <div class="fields">
+        <input id="query" type="text" placeholder="UGA ID or name" autocomplete="off">
+      </div>
+      <div id="results" class="buttons"></div>
+      <p><button id="no-roster" class="link">Not on the list? Enter your email</button></p>
+    </section>
+    <section id="manual" hidden>
+      <form id="manual-form" class="fields">
+        <input id="email" type="email" placeholder="Email" autocomplete="off">
+        <button>Send</button>
+      </form>
+    </section>
   </main>
   <script src="/static/camera.js"></script>
   <script src="/static/booth.js"></script>

@@ -7,8 +7,19 @@
 //   headers: () => ({}),           // extra request headers
 //   check: () => null,             // return a message to block capture, or null
 //   describe: (body) => "text",    // turn the JSON response into a status line
+//   onResult: (body) => {},        // called after a successful response
+//   onReset: () => {},             // called when going back to the live camera
 // })
-function setupCamera({ endpoint, headers = () => ({}), check = () => null, describe }) {
+//
+// Returns { reset } so the page can go back to the live camera itself.
+function setupCamera({
+  endpoint,
+  headers = () => ({}),
+  check = () => null,
+  describe,
+  onResult = () => {},
+  onReset = () => {},
+}) {
   const video = document.getElementById("video");
   const canvas = document.getElementById("canvas");
   const statusEl = document.getElementById("status");
@@ -48,10 +59,13 @@ function setupCamera({ endpoint, headers = () => ({}), check = () => null, descr
     captureBtn.disabled = !cameraReady;
     if (uploadBtn) uploadBtn.hidden = uploadBtn.disabled = false;
     setStatus(prompt);
+    onReset();
   }
 
   // Draw a picture onto the canvas, shrunk to at most maxSide pixels.
+  // Camera photos are displayed mirrored to match the live preview; uploads aren't.
   function drawToCanvas(source, width, height, maxSide = Infinity) {
+    canvas.classList.toggle("mirrored", source === video);
     const scale = Math.min(1, maxSide / Math.max(width, height));
     canvas.width = Math.round(width * scale);
     canvas.height = Math.round(height * scale);
@@ -110,6 +124,7 @@ function setupCamera({ endpoint, headers = () => ({}), check = () => null, descr
       const body = await res.json();
       if (!res.ok) throw new Error(body.detail || res.statusText);
       setStatus(describe(body));
+      onResult(body);
     } catch (err) {
       setStatus(`Something went wrong: ${err.message}`);
     }
@@ -130,11 +145,13 @@ function setupCamera({ endpoint, headers = () => ({}), check = () => null, descr
     });
   }
   document.addEventListener("keydown", (e) => {
-    if (e.code !== "Space" || e.target.tagName === "INPUT") return;
+    // Space is for the camera, not for typing or for a focused button.
+    if (e.code !== "Space" || ["INPUT", "BUTTON"].includes(e.target.tagName)) return;
     e.preventDefault();
     if (!retakeBtn.hidden) showLive();
     else capture();
   });
 
   startCamera();
+  return { reset: showLive };
 }

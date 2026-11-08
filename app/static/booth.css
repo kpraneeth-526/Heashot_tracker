@@ -19,8 +19,11 @@ main {
   background: #000;
 }
 
-/* Mirror the live preview so it behaves like a mirror; the captured photo is not mirrored. */
-.stage video {
+/* Mirror the live preview so it behaves like a mirror, and show a camera photo
+   the same way so it doesn't flip after capture. Only the display is mirrored:
+   the photo sent to the server is the true (unmirrored) image. */
+.stage video,
+.stage canvas.mirrored {
   transform: scaleX(-1);
 }
 
@@ -86,4 +89,20 @@ button.secondary {
   flex-wrap: wrap;
   gap: 0.75rem;
   justify-content: center;
+}
+
+section {
+  margin-top: 1rem;
+}
+
+#results {
+  margin-bottom: 0.5rem;
+}
+
+button.link {
+  background: none;
+  padding: 0.3em;
+  font-size: 1rem;
+  color: #90cdf4;
+  text-decoration: underline;
 }

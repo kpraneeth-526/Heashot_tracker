@@ -182,3 +182,25 @@ def test_cached_embedder_reuses_saved_embeddings(tmp_path, monkeypatch):
     embed(Path("x/Bob/Bob_0001.jpg"))  # saved without a face: computed normally
     embed(Path("x/Cy/Cy_0001.jpg"))  # not in the file: computed normally
     assert computed == ["Bob_0001.jpg", "Cy_0001.jpg"]
+
+
+def test_load_gallery_optional_uga_id(tmp_path):
+    csv_path = write_gallery(tmp_path, [
+        "name,email,filename,uga_id",
+        "Ada,ada@example.edu,a.jpg,811-123 4567",
+        "Alan,alan@example.edu,b.jpg,",
+    ])
+    assert [e.uga_id for e in load_gallery(csv_path)] == ["8111234567", ""]
+
+
+def test_load_gallery_bad_and_duplicate_uga_id(tmp_path):
+    csv_path = write_gallery(tmp_path, [
+        "name,email,filename,uga_id",
+        "Ada,ada@example.edu,a.jpg,8111234567",
+        "Alan,alan@example.edu,b.jpg,811-123-4567",
+        "Grace,grace@example.edu,a.jpg,81x",
+    ])
+    with pytest.raises(ValueError) as exc:
+        load_gallery(csv_path)
+    assert "line 3: duplicate uga_id" in str(exc.value)
+    assert "line 4: invalid uga_id" in str(exc.value)

@@ -10,3 +10,4 @@ gallery/*
 
 # Public datasets (LFW) and cached embeddings; download locally.
 data/
+.DS_Store

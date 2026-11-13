@@ -31,6 +31,25 @@ To test with your own face, open http://localhost:8000/enroll, enter a name and
 email, and take a reference photo. Then use the booth at http://localhost:8000.
 Registrations are kept in memory only and are gone when the app stops.
 
+After each photo the booth shows the match score and the lead over the
+next-best person, next to what each needs to pass. The terminal log shows the
+same numbers (never names). Start with `SHOW_SCORES=0` to hide them on screen,
+as a real booth should.
+
+### Demo mode: keep volunteers between runs
+
+Start the booth with `VOLUNTEERS_DIR` to let people tick "Save my photo" when
+registering. Their photo is saved in that folder and they're loaded again at
+every start. Without `VOLUNTEERS_DIR`, nothing is ever saved.
+
+    VOLUNTEERS_DIR=gallery/volunteers GALLERY_CSV=gallery/lfw_gallery.csv GALLERY_CACHE=data/lfw_embeddings.npz .venv/bin/uvicorn app.main:app
+
+`gallery/` is git-ignored, so volunteer photos never reach GitHub. To see or
+delete saved volunteers:
+
+    .venv/bin/python -m app.volunteers list gallery/volunteers
+    .venv/bin/python -m app.volunteers remove gallery/volunteers friend@example.com
+
 ## Accuracy on LFW
 
     .venv/bin/python -m eval.evaluate                  # default thresholds

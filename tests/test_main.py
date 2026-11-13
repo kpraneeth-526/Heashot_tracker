@@ -23,6 +23,7 @@ def client(monkeypatch):
     """Booth app with the face model replaced: every photo has one good face
     whose embedding is `client.embedding` (default: Ada's)."""
     monkeypatch.delenv("GALLERY_CSV", raising=False)
+    monkeypatch.delenv("VOLUNTEERS_DIR", raising=False)
     monkeypatch.setattr(face, "detect_faces", lambda img: [object()])
     with TestClient(app) as c:
         c.embedding = ADA
@@ -63,7 +64,9 @@ def test_capture_reports_quality_problem(client, monkeypatch):
 
 
 def without_ticket(body):
+    """The reply minus its random ticket and the scores (tested separately)."""
     assert body.pop("ticket")
+    body.pop("scores", None)
     return body
 
 
@@ -79,7 +82,7 @@ def enroll(client, name, email):
 
 def test_enroll_then_match(client):
     assert enroll(client, "Grace%20Hopper", "grace%40example.edu").json() == {
-        "ok": True, "name": "Grace Hopper", "gallery_size": 1}
+        "ok": True, "name": "Grace Hopper", "saved": False, "gallery_size": 1}
     assert without_ticket(post_photo(client).json()) == {
         "ok": True, "match": {"name": "Grace Hopper"}}
     assert client.app.state.gallery.entries[0].email == "grace@example.edu"
@@ -234,3 +237,72 @@ def test_enroll_with_uga_id(client):
         "Content-Type": "image/jpeg", "X-Name": "Grace", "X-Email": "grace@example.edu",
         "X-Uga-Id": "abc"})
     assert bad.status_code == 400
+
+
+def fake_face(monkeypatch, embedding):
+    monkeypatch.setattr(face, "detect_faces", lambda img: [object()])
+    monkeypatch.setattr(face, "check_quality", lambda img, faces: face.Quality(
+        True, face=SimpleNamespace(normed_embedding=embedding)))
+
+
+def enroll_and_save(client, name, email, save="1"):
+    return client.post("/enroll", content=jpeg_bytes(), headers={
+        "Content-Type": "image/jpeg", "X-Name": name, "X-Email": email, "X-Save": save})
+
+
+def test_saved_volunteer_is_back_after_restart(tmp_path, monkeypatch):
+    folder = tmp_path / "volunteers"
+    monkeypatch.delenv("GALLERY_CSV", raising=False)
+    monkeypatch.setenv("VOLUNTEERS_DIR", str(folder))
+    monkeypatch.setattr(main, "embed_photo", lambda path: ALAN)  # model stand-in at startup
+    fake_face(monkeypatch, ALAN)
+
+    with TestClient(app) as c:
+        res = enroll_and_save(c, "Alan Turing", "alan@example.edu")
+        assert res.json()["saved"] is True
+        assert len(list(folder.glob("*.jpg"))) == 1
+
+    with TestClient(app) as c:  # a fresh start: memory is empty, the folder is not
+        assert len(c.app.state.gallery) == 1
+        assert post_photo(c).json()["match"] == {"name": "Alan Turing"}
+
+
+def test_unticked_volunteer_is_not_saved(tmp_path, monkeypatch):
+    folder = tmp_path / "volunteers"
+    monkeypatch.delenv("GALLERY_CSV", raising=False)
+    monkeypatch.setenv("VOLUNTEERS_DIR", str(folder))
+    fake_face(monkeypatch, ADA)
+    with TestClient(app) as c:
+        assert enroll_and_save(c, "Ada", "ada@example.edu", save="0").json()["saved"] is False
+    assert not folder.exists()
+
+
+def test_save_refused_when_booth_not_in_demo_mode(client):
+    res = enroll_and_save(client, "Ada", "ada@example.edu")
+    assert res.status_code == 400
+    assert "Saving is turned off" in res.json()["detail"]
+    assert len(client.app.state.gallery) == 0
+
+
+def test_capture_includes_scores(client, capsys):
+    with_gallery(client)
+    body = post_photo(client).json()
+    assert body["scores"] == {"best": 1.0, "margin": 1.0, "min_score": main.MIN_SCORE,
+                              "min_margin": main.MIN_MARGIN}
+    log = capsys.readouterr().out
+    assert "capture: score 1.00, lead 1.00 -> match" in log
+    assert "Ada" not in log  # scores only, never who it was
+
+
+def test_scores_can_be_hidden(monkeypatch):
+    monkeypatch.setenv("SHOW_SCORES", "0")
+    monkeypatch.delenv("GALLERY_CSV", raising=False)
+    monkeypatch.delenv("VOLUNTEERS_DIR", raising=False)
+    fake_face(monkeypatch, ADA)
+    with TestClient(app) as c:
+        with_gallery(c)
+        assert "scores" not in post_photo(c).json()
+
+
+def test_no_scores_with_empty_gallery(client):
+    assert "scores" not in post_photo(client).json()

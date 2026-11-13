@@ -9,13 +9,18 @@
 <body>
   <main>
     <h1>Register for Headshots</h1>
-    <p class="note">Testing only. Your photo is not saved; the face data is kept in memory
-      and erased when the booth stops.</p>
+    <p class="note">Testing only. Unless you tick the box below, your photo is not saved:
+      the face data is kept in memory and erased when the booth stops.</p>
     <div class="fields">
       <input id="name" type="text" placeholder="Name" autocomplete="off">
       <input id="email" type="email" placeholder="Email" autocomplete="off">
       <input id="uga-id" type="text" inputmode="numeric" placeholder="UGA ID (optional)" autocomplete="off">
     </div>
+    <label class="consent">
+      <input id="save" type="checkbox">
+      Save my photo on this computer so I'm still registered next time (demo only;
+      ask the booth owner to delete it any time)
+    </label>
     <div class="stage">
       <video id="video" autoplay playsinline muted></video>
       <canvas id="canvas" hidden></canvas>

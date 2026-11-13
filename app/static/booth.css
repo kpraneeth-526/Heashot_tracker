@@ -106,3 +106,12 @@ button.link {
   color: #90cdf4;
   text-decoration: underline;
 }
+
+.consent {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  max-width: 40rem;
+  margin: 0 auto 1rem;
+  text-align: left;
+}

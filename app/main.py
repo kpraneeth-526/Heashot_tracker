@@ -6,6 +6,10 @@
     # LFW gallery, reusing the embeddings saved by eval.evaluate (fast start)
     GALLERY_CSV=gallery/lfw_gallery.csv GALLERY_CACHE=data/lfw_embeddings.npz \\
         uvicorn app.main:app
+
+    # Demo mode: volunteers who tick "save" at /enroll are kept in this folder
+    # and loaded again at the next start. Without it, nothing is ever saved.
+    VOLUNTEERS_DIR=gallery/volunteers uvicorn app.main:app
 """
 
 import os
@@ -21,8 +25,10 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app import face, roster
+from app import face, roster, volunteers
 from app.matcher import (
+    MIN_MARGIN,
+    MIN_SCORE,
     GalleryEntry,
     embed_photo,
     add_to_gallery,
@@ -55,11 +61,21 @@ class Pending:
 async def lifespan(app: FastAPI):
     app.state.gallery = empty_gallery()
     app.state.pending = OrderedDict()
-    csv_path = os.environ.get("GALLERY_CSV")
-    if csv_path:
+    app.state.volunteers_dir = os.environ.get("VOLUNTEERS_DIR")
+    # Show match scores on the booth screen while testing; SHOW_SCORES=0 hides them.
+    app.state.show_scores = os.environ.get("SHOW_SCORES", "1") != "0"
+    entries = []
+    if csv_path := os.environ.get("GALLERY_CSV"):
+        entries += load_gallery(csv_path)
+    saved = volunteers.csv_path(app.state.volunteers_dir) if app.state.volunteers_dir else None
+    if saved:
+        saved_entries = load_gallery(saved)
+        print(f"gallery: {len(saved_entries)} saved volunteer(s)", flush=True)
+        entries += saved_entries
+    if entries:
         cache_path = os.environ.get("GALLERY_CACHE")
         embed = cached_embedder(cache_path) if cache_path else embed_photo
-        gallery = build_gallery(load_gallery(csv_path), embed)
+        gallery = build_gallery(entries, embed)
         for entry, reason in gallery.skipped:
             print(f"gallery: skipped {entry.photo.name}: {reason}", flush=True)
         print(f"gallery: {len(gallery)} students loaded", flush=True)
@@ -118,10 +134,32 @@ async def capture_photo(request: Request):
 
     decision = decide(match(quality.face.normed_embedding, request.app.state.gallery))
     ticket = _new_ticket(request.app, Pending(decision.entry))
+    scores = _scores(decision.result)
+    # Scores only, no names: the log must not record who was at the booth.
+    if scores:
+        lead = "n/a" if scores["margin"] is None else f"{scores['margin']:.2f}"
+        print(f"capture: score {scores['best']:.2f}, lead {lead} -> {decision.reason}", flush=True)
+
     if decision.entry is None:
-        return {"ok": True, "ticket": ticket, "match": None, "fallback": decision.reason}
-    # Only the name goes to the browser; the email stays on the server.
-    return {"ok": True, "ticket": ticket, "match": {"name": decision.entry.name}}
+        reply = {"ok": True, "ticket": ticket, "match": None, "fallback": decision.reason}
+    else:
+        # Only the name goes to the browser; the email stays on the server.
+        reply = {"ok": True, "ticket": ticket, "match": {"name": decision.entry.name}}
+    if request.app.state.show_scores and scores:
+        reply["scores"] = scores
+    return reply
+
+
+def _scores(result) -> dict | None:
+    """Best score, lead over the runner-up, and what each needs to pass."""
+    if result.best is None:
+        return None
+    return {
+        "best": round(result.best_score, 3),
+        "margin": round(result.margin, 3) if result.second_score > -1 else None,
+        "min_score": MIN_SCORE,
+        "min_margin": MIN_MARGIN,
+    }
 
 
 def _new_ticket(app: FastAPI, pending: Pending) -> str:
@@ -190,8 +228,10 @@ def confirm(body: ConfirmRequest, request: Request):
 
 @app.post("/enroll")
 async def enroll(request: Request):
-    """Register someone at the booth for testing. Only the embedding is kept,
-    in memory, until the app stops; the photo itself is discarded.
+    """Register someone at the booth for testing. Normally only the embedding
+    is kept, in memory, until the app stops, and the photo is discarded.
+    In demo mode (VOLUNTEERS_DIR set) a person who ticks "save" (X-Save: 1)
+    has their photo saved there so they're still registered next time.
 
     Name and email come in headers (URL-encoded) rather than the query string,
     which would put them in the server's access log.
@@ -203,10 +243,18 @@ async def enroll(request: Request):
         raise HTTPException(400, "Please enter a name and a valid email.")
     if uga_id and not uga_id.isdigit():
         raise HTTPException(400, "A UGA ID can only contain digits.")
+    save = request.headers.get("X-Save") == "1"
+    folder = request.app.state.volunteers_dir
+    if save and not folder:
+        raise HTTPException(400, "Saving is turned off on this booth. Untick the box to register "
+                                 "for this session only.")
     quality = await read_photo(request)
     if not quality.ok:
         return {"ok": False, "reason": quality.reason}
 
+    photo = None
+    if save:
+        photo = volunteers.save(folder, name, email, uga_id, await request.body())
     gallery = request.app.state.gallery
-    add_to_gallery(gallery, GalleryEntry(name, email, None, uga_id), quality.face.normed_embedding)
-    return {"ok": True, "name": name, "gallery_size": len(gallery)}
+    add_to_gallery(gallery, GalleryEntry(name, email, photo, uga_id), quality.face.normed_embedding)
+    return {"ok": True, "name": name, "saved": save, "gallery_size": len(gallery)}

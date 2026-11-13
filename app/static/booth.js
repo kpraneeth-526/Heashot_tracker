@@ -88,6 +88,7 @@ setupCamera({
     return "We couldn't find you automatically. Type your UGA ID or name.";
   },
   onResult: (body) => {
+    showScores(body.scores);
     if (!body.ok) return;
     ticket = body.ticket;
     if (body.match) show("confirm");
@@ -96,9 +97,21 @@ setupCamera({
   onReset: () => {
     ticket = null;
     show(null);
+    showScores(null);
     retakeBtn.textContent = "Retake";
   },
 });
+
+// Testing aid: how close the photo came to passing. Hidden with SHOW_SCORES=0.
+function showScores(scores) {
+  const el = document.getElementById("scores");
+  el.hidden = !scores;
+  if (!scores) return;
+  const lead = scores.margin === null ? "n/a (only one person in gallery)" : scores.margin.toFixed(2);
+  el.textContent =
+    `Match score ${scores.best.toFixed(2)} (needs ${scores.min_score.toFixed(2)}) · ` +
+    `Lead over next-best person ${lead} (needs ${scores.min_margin.toFixed(2)})`;
+}
 
 document.getElementById("yes").addEventListener("click", () => finish({ match: true }));
 document.getElementById("not-me").addEventListener("click", () =>

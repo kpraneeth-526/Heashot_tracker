@@ -10,12 +10,23 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from app import face, main
+from app.cleanup import read_events
 from app.main import app
 from app.matcher import Gallery, GalleryEntry
 
 ADA = np.array([1.0, 0.0, 0.0], dtype=np.float32)
 ALAN = np.array([0.0, 1.0, 0.0], dtype=np.float32)
 STRANGER = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+
+
+@pytest.fixture(autouse=True)
+def isolated(tmp_path, monkeypatch):
+    """Every test gets its own audit log, and email is captured, never sent."""
+    monkeypatch.setenv("AUDIT_DB", str(tmp_path / "audit.db"))
+    outbox = []
+    monkeypatch.setattr(main, "send_email",
+                        lambda to, name, photo: outbox.append((to, name, photo)))
+    return SimpleNamespace(audit_db=tmp_path / "audit.db", outbox=outbox)
 
 
 @pytest.fixture
@@ -142,18 +153,24 @@ def test_pages_and_scripts_are_not_cached(client):
 
 # --- Confirm / Not me / lookup / typed email ---------------------------------
 
-def capture_ticket(client):
-    return post_photo(client).json()["ticket"]
+def capture_ticket(client, photo=None):
+    """Take a photo and return its ticket."""
+    return post_photo(client, photo).json()["ticket"]
 
 
-def test_confirm_auto_match(client, capsys):
+def test_confirm_auto_match_emails_the_photo(client, isolated, capsys):
     with_gallery(client)
-    ticket = capture_ticket(client)
+    photo = jpeg_bytes()
+    ticket = capture_ticket(client, photo)
+    pending = client.app.state.pending[ticket]
     assert client.post("/confirm", json={"ticket": ticket, "match": True}).json() == {
-        "ok": True, "name": "Ada Lovelace"}
+        "ok": True, "name": "Ada Lovelace", "sent": True}
+    assert isolated.outbox == [("ada@example.edu", "Ada Lovelace", photo)]
+    assert pending.photo == bytearray()  # wiped after sending
+    assert [status for _, status in read_events(isolated.audit_db)] == ["sent"]
     out = capsys.readouterr().out
-    assert "confirm: Ada Lovelace via auto-match" in out
-    assert "@" not in out
+    assert "confirm: via auto-match -> sent" in out
+    assert "@" not in out and "Ada" not in out
 
 
 def test_ticket_works_once(client):
@@ -175,14 +192,15 @@ def test_cannot_confirm_a_match_that_did_not_happen(client):
     assert client.post("/confirm", json={"ticket": ticket, "match": True}).status_code == 400
 
 
-def test_not_me_then_lookup_by_name(client):
+def test_not_me_then_lookup_by_name(client, isolated):
     with_gallery(client)
     ticket = capture_ticket(client)  # matched Ada, but it's really Alan
     res = client.post("/lookup", json={"ticket": ticket, "query": "alan tu"})
     assert res.json() == {"results": [{"choice": 0, "name": "Alan Turing"}]}
     assert "@" not in res.text and "811" not in res.text
     assert client.post("/confirm", json={"ticket": ticket, "choice": 0}).json() == {
-        "ok": True, "name": "Alan Turing"}
+        "ok": True, "name": "Alan Turing", "sent": True}
+    assert [to for to, _, _ in isolated.outbox] == ["alan@example.edu"]
 
 
 def test_lookup_by_uga_id(client):
@@ -204,7 +222,7 @@ def test_confirm_typed_email(client, capsys):
     ticket = capture_ticket(client)
     assert client.post("/confirm", json={"ticket": ticket, "email": "not-an-email"}).status_code == 400
     assert client.post("/confirm", json={"ticket": ticket, "email": "new@example.edu"}).json() == {
-        "ok": True, "name": None}
+        "ok": True, "name": None, "sent": True}
     out = capsys.readouterr().out
     assert "via typed email" in out
     assert "new@example.edu" not in out
@@ -306,3 +324,57 @@ def test_scores_can_be_hidden(monkeypatch):
 
 def test_no_scores_with_empty_gallery(client):
     assert "scores" not in post_photo(client).json()
+
+
+def test_failed_email_is_logged_and_photo_still_wiped(client, isolated, monkeypatch, capsys):
+    with_gallery(client)
+    def broken(to, name, photo):
+        raise ConnectionRefusedError("ada@example.edu unreachable")
+    monkeypatch.setattr(main, "send_email", broken)
+    ticket = capture_ticket(client, jpeg_bytes())
+    pending = client.app.state.pending[ticket]
+    assert client.post("/confirm", json={"ticket": ticket, "match": True}).json()["sent"] is False
+    assert pending.photo == bytearray()
+    assert [status for _, status in read_events(isolated.audit_db)] == ["failed"]
+    out = capsys.readouterr().out
+    assert "email: failed (ConnectionRefusedError)" in out
+    assert "@" not in out  # the error text contains the address; it must not be logged
+
+
+def test_audit_log_has_only_time_and_status(client, isolated):
+    with_gallery(client)
+    ticket = capture_ticket(client, jpeg_bytes())
+    client.post("/confirm", json={"ticket": ticket, "match": True})
+    [(at, status)] = read_events(isolated.audit_db)
+    assert status == "sent" and at.endswith("+00:00")
+    raw = isolated.audit_db.read_bytes()
+    assert b"ada" not in raw.lower() and b"Lovelace" not in raw
+
+
+def test_abandoned_photo_expires_and_is_wiped(client, monkeypatch):
+    with_gallery(client)
+    ticket = capture_ticket(client, jpeg_bytes())
+    pending = client.app.state.pending[ticket]
+    monkeypatch.setattr(main, "PENDING_TTL_S", 0)
+    assert client.post("/confirm", json={"ticket": ticket, "match": True}).status_code == 404
+    capture_ticket(client, jpeg_bytes())  # the next photo clears old ones out
+    assert ticket not in client.app.state.pending
+    assert pending.photo == bytearray()
+
+
+def test_dropped_tickets_wipe_their_photos(client, monkeypatch):
+    monkeypatch.setattr(main, "MAX_PENDING", 1)
+    first = capture_ticket(client, jpeg_bytes())
+    pending = client.app.state.pending[first]
+    capture_ticket(client, jpeg_bytes())
+    assert pending.photo == bytearray()
+
+
+def test_shutdown_wipes_waiting_photos(monkeypatch):
+    monkeypatch.delenv("GALLERY_CSV", raising=False)
+    monkeypatch.delenv("VOLUNTEERS_DIR", raising=False)
+    fake_face(monkeypatch, ADA)
+    with TestClient(app) as c:
+        pending = c.app.state.pending[capture_ticket(c, jpeg_bytes())]
+        assert len(pending.photo) > 0
+    assert pending.photo == bytearray()

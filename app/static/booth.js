@@ -70,8 +70,11 @@ async function search() {
 
 async function finish(choice) {
   try {
-    const { name } = await post("/confirm", choice);
-    statusEl.textContent = name ? `Thanks, ${name}! You're all set.` : "Thanks! You're all set.";
+    const { name, sent } = await post("/confirm", choice);
+    const thanks = name ? `Thanks, ${name}!` : "Thanks!";
+    statusEl.textContent = sent
+      ? `${thanks} Your headshot is on its way to your email.`
+      : "Sorry, we couldn't send your email. Please retake your photo or ask the booth staff.";
     show(null);
     ticket = null;
     retakeBtn.textContent = "Next person";

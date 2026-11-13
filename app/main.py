@@ -14,6 +14,7 @@
 
 import os
 import secrets
+import time
 from collections import OrderedDict
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -26,6 +27,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app import face, roster, volunteers
+from app.cleanup import log_event, purge
+from app.mailer import describe_server, load_env_file, send_email
+
+# Mail settings (e.g. a Gmail login) can live in a git-ignored .env file.
+load_env_file()
 from app.matcher import (
     MIN_MARGIN,
     MIN_SCORE,
@@ -45,16 +51,19 @@ from app.matcher import (
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_PENDING = 50  # captures waiting for Confirm; the oldest is dropped beyond this
+PENDING_TTL_S = 10 * 60  # an unconfirmed photo is forgotten after this long
 
 
 @dataclass
 class Pending:
     """A booth photo waiting for the student to confirm who they are. The
     browser only holds the ticket, so emails and UGA IDs never leave the
-    server. (Week 3: the headshot itself will be held here until it's sent.)"""
+    server. The headshot is held here, in memory, until it's emailed."""
 
     match: GalleryEntry | None
+    photo: bytearray = field(default_factory=bytearray)
     candidates: list[GalleryEntry] = field(default_factory=list)
+    created: float = field(default_factory=time.monotonic)
 
 
 @asynccontextmanager
@@ -62,6 +71,8 @@ async def lifespan(app: FastAPI):
     app.state.gallery = empty_gallery()
     app.state.pending = OrderedDict()
     app.state.volunteers_dir = os.environ.get("VOLUNTEERS_DIR")
+    app.state.audit_db = os.environ.get("AUDIT_DB", "audit.db")
+    print(f"email: sending through {describe_server()}", flush=True)
     # Show match scores on the booth screen while testing; SHOW_SCORES=0 hides them.
     app.state.show_scores = os.environ.get("SHOW_SCORES", "1") != "0"
     entries = []
@@ -83,6 +94,8 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        for pending in app.state.pending.values():
+            purge(pending.photo)
         app.state.pending.clear()
         wipe_gallery(app.state.gallery)
 
@@ -133,7 +146,7 @@ async def capture_photo(request: Request):
         return {"ok": False, "reason": quality.reason}
 
     decision = decide(match(quality.face.normed_embedding, request.app.state.gallery))
-    ticket = _new_ticket(request.app, Pending(decision.entry))
+    ticket = _new_ticket(request.app, Pending(decision.entry, bytearray(await request.body())))
     scores = _scores(decision.result)
     # Scores only, no names: the log must not record who was at the booth.
     if scores:
@@ -163,16 +176,21 @@ def _scores(result) -> dict | None:
 
 
 def _new_ticket(app: FastAPI, pending: Pending) -> str:
+    waiting = app.state.pending
     ticket = secrets.token_urlsafe(16)
-    app.state.pending[ticket] = pending
-    while len(app.state.pending) > MAX_PENDING:
-        app.state.pending.popitem(last=False)
+    waiting[ticket] = pending
+    # Forget abandoned photos: anything too old, and the oldest beyond MAX_PENDING.
+    while waiting:
+        oldest = next(iter(waiting.values()))
+        if len(waiting) <= MAX_PENDING and time.monotonic() - oldest.created < PENDING_TTL_S:
+            break
+        purge(waiting.popitem(last=False)[1].photo)
     return ticket
 
 
 def _pending(request: Request, ticket: str) -> Pending:
     pending = request.app.state.pending.get(ticket)
-    if pending is None:
+    if pending is None or time.monotonic() - pending.created >= PENDING_TTL_S:
         raise HTTPException(404, "This photo has expired. Please retake it.")
     return pending
 
@@ -221,9 +239,18 @@ def confirm(body: ConfirmRequest, request: Request):
         entry, how = GalleryEntry("", email, None), "typed email"
 
     del request.app.state.pending[body.ticket]
-    # Week 3: send the headshot to entry.email here. Emails are never logged.
-    print(f"confirm: {entry.name or '(not on roster)'} via {how}", flush=True)
-    return {"ok": True, "name": entry.name or None}
+    try:
+        send_email(entry.email, entry.name, bytes(pending.photo))
+        status = "sent"
+    except Exception as e:
+        status = "failed"
+        print(f"email: failed ({type(e).__name__})", flush=True)
+    finally:
+        purge(pending.photo)
+    log_event(request.app.state.audit_db, status)
+    # How they were identified and whether it sent; never who they are.
+    print(f"confirm: via {how} -> {status}", flush=True)
+    return {"ok": True, "name": entry.name or None, "sent": status == "sent"}
 
 
 @app.post("/enroll")

@@ -36,6 +36,26 @@ next-best person, next to what each needs to pass. The terminal log shows the
 same numbers (never names). Start with `SHOW_SCORES=0` to hide them on screen,
 as a real booth should.
 
+### Email
+
+After a student confirms who they are, the booth emails them the headshot,
+then wipes the photo from memory. Unconfirmed photos are wiped after 10
+minutes. `audit.db` (SQLite, git-ignored) records only a timestamp and
+"sent" or "failed" for each email.
+
+For testing, run Mailpit, a fake inbox that catches every email so nothing
+reaches a real person. Install it once with `brew install mailpit`, then run
+`mailpit` in its own terminal and open http://localhost:8025 to see the emails.
+A real deployment points `SMTP_HOST`, `SMTP_PORT` and `MAIL_FROM` at the
+university's own mail server.
+
+To send **real** email for a demo, copy `.env.example` to `.env` and fill in
+a Gmail login (use a separate demo account and a Google App Password). `.env`
+is git-ignored. The booth's first log line says where email is going. To send
+all LFW people's emails to one inbox of yours instead of fake addresses:
+
+    .venv/bin/python -m eval.make_lfw_gallery --people 0 --email-to you@gmail.com
+
 ### Demo mode: keep volunteers between runs
 
 Start the booth with `VOLUNTEERS_DIR` to let people tick "Save my photo" when

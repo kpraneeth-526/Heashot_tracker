@@ -10,6 +10,13 @@ import cv2
 import numpy as np
 from PIL import Image, ImageOps
 
+try:  # lets Pillow open iPhone HEIC photos
+    from pillow_heif import register_heif_opener
+
+    register_heif_opener()
+except ImportError:
+    pass
+
 MODEL_NAME = "buffalo_l"
 DET_SIZE = (640, 640)
 # Faces smaller than this fraction of the largest face are treated as
@@ -63,6 +70,18 @@ def decode_image(data: bytes) -> np.ndarray:
     except Exception as e:
         raise FaceError(f"could not decode image: {e}") from e
     return np.ascontiguousarray(np.asarray(img)[:, :, ::-1])
+
+
+def to_jpeg(data: bytes) -> bytes:
+    """Re-encode any photo Pillow can open (HEIC included) as a JPEG,
+    the right way up."""
+    try:
+        img = ImageOps.exif_transpose(Image.open(io.BytesIO(data))).convert("RGB")
+    except Exception as e:
+        raise FaceError(f"could not decode image: {e}") from e
+    out = io.BytesIO()
+    img.save(out, "JPEG", quality=92)
+    return out.getvalue()
 
 
 def load_image(path: str | Path) -> np.ndarray:

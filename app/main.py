@@ -10,6 +10,10 @@
     # Demo mode: volunteers who tick "save" at /enroll are kept in this folder
     # and loaded again at the next start. Without it, nothing is ever saved.
     VOLUNTEERS_DIR=gallery/volunteers uvicorn app.main:app
+
+    # A DSLR plugged in by USB is used automatically (live view, full-size
+    # photos); without one the booth uses the webcam. DSLR=0 never looks.
+    DSLR=0 uvicorn app.main:app
 """
 
 import os
@@ -22,11 +26,11 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app import face, roster, volunteers
+from app import dslr, face, roster, volunteers
 from app.cleanup import log_event, purge
 from app.mailer import describe_server, load_env_file, send_email
 
@@ -49,7 +53,9 @@ from app.matcher import (
 )
 
 STATIC_DIR = Path(__file__).parent / "static"
-MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+# Big enough for a full-size DSLR JPEG. Gmail allows 25 MB per email, and an
+# attachment grows by a third when encoded, so 18 MB is the most it can send.
+MAX_UPLOAD_BYTES = 18 * 1024 * 1024
 MAX_PENDING = 50  # captures waiting for Confirm; the oldest is dropped beyond this
 PENDING_TTL_S = 10 * 60  # an unconfirmed photo is forgotten after this long
 
@@ -72,6 +78,13 @@ async def lifespan(app: FastAPI):
     app.state.pending = OrderedDict()
     app.state.volunteers_dir = os.environ.get("VOLUNTEERS_DIR")
     app.state.audit_db = os.environ.get("AUDIT_DB", "audit.db")
+    app.state.dslr = dslr.Dslr() if os.environ.get("DSLR") != "0" else None
+    if app.state.dslr:
+        try:
+            print(f"camera: DSLR connected ({app.state.dslr.connect()})", flush=True)
+        except dslr.CameraError:
+            print("camera: no DSLR found, so the booth will use the webcam. Plug one in "
+                  "and reload the page to use it.", flush=True)
     print(f"email: sending through {describe_server()}", flush=True)
     # Show match scores on the booth screen while testing; SHOW_SCORES=0 hides them.
     app.state.show_scores = os.environ.get("SHOW_SCORES", "1") != "0"
@@ -98,6 +111,8 @@ async def lifespan(app: FastAPI):
             purge(pending.photo)
         app.state.pending.clear()
         wipe_gallery(app.state.gallery)
+        if app.state.dslr:
+            app.state.dslr.close()
 
 
 app = FastAPI(title="Headshot Auto-Match", lifespan=lifespan)
@@ -139,10 +154,29 @@ async def read_photo(request: Request):
     return face.check_quality(img, face.detect_faces(img))
 
 
+@app.post("/convert")
+async def convert_photo(request: Request):
+    """Turn an uploaded photo the browser can't open (some iPhone HEIC
+    photos) into a JPEG. In memory only, like every other photo."""
+    data = await request.body()
+    if not data:
+        raise HTTPException(400, "empty upload")
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "photo too large")
+    try:
+        jpeg = face.to_jpeg(data)
+    except face.FaceError:
+        raise HTTPException(400, "Couldn't open that file. Please choose a JPG, PNG or HEIC photo.")
+    return Response(jpeg, media_type="image/jpeg")
+
+
 @app.post("/capture")
 async def capture_photo(request: Request):
     quality = await read_photo(request)
     if not quality.ok:
+        numbers = ", ".join(f"{k} {v:.2f}" if isinstance(v, float) else f"{k} {v}"
+                            for k, v in quality.metrics.items())
+        print(f"capture: rejected, {quality.reason} ({numbers})", flush=True)
         return {"ok": False, "reason": quality.reason}
 
     decision = decide(match(quality.face.normed_embedding, request.app.state.gallery))
@@ -161,6 +195,63 @@ async def capture_photo(request: Request):
     if request.app.state.show_scores and scores:
         reply["scores"] = scores
     return reply
+
+
+# DSLR. The page asks /camera whether one is connected (otherwise it uses the
+# webcam). With a DSLR, the page shows /camera/frame
+# over and over as live view. /camera/take fires the camera and hands back
+# the full-size JPEG, which the page then sends to /capture or /enroll just
+# like a webcam photo.
+def _camera(request: Request) -> dslr.Dslr:
+    if request.app.state.dslr is None:
+        raise HTTPException(404, "DSLR support is turned off on this booth (DSLR=0).")
+    return request.app.state.dslr
+
+
+@app.get("/camera")
+def camera_info(request: Request):
+    """Asked when the page loads: DSLR if one is plugged in, else the webcam."""
+    camera = request.app.state.dslr
+    if camera is None:
+        return {"dslr": False}
+    try:
+        camera.connect()
+    except dslr.CameraError as e:
+        return {"dslr": False, "reason": str(e)}
+    return {"dslr": True}
+
+
+@app.get("/camera/frame")
+def camera_frame(request: Request):
+    camera = _camera(request)
+    try:
+        frame = camera.frame()
+    except dslr.CameraError as e:
+        raise HTTPException(503, str(e))
+    # Tells the page a photo was taken with the camera's shutter button;
+    # the page then fetches it from /camera/shutter.
+    headers = {"X-Shutter": "1"} if camera.shutter_waiting() else {}
+    return Response(frame, media_type="image/jpeg", headers=headers)
+
+
+@app.post("/camera/shutter")
+def camera_shutter(request: Request):
+    photo = _camera(request).shutter_photo()
+    if photo is None:
+        return Response(status_code=204)
+    print(f"camera: shutter button photo, {len(photo) // 1024} KB, {dslr.exposure(photo)}",
+          flush=True)
+    return Response(photo, media_type="image/jpeg")
+
+
+@app.post("/camera/take")
+def camera_take(request: Request):
+    try:
+        photo = _camera(request).take()
+    except dslr.CameraError as e:
+        raise HTTPException(503, str(e))
+    print(f"camera: photo taken, {len(photo) // 1024} KB, {dslr.exposure(photo)}", flush=True)
+    return Response(photo, media_type="image/jpeg")
 
 
 def _scores(result) -> dict | None:

@@ -23,8 +23,25 @@ main {
    the same way so it doesn't flip after capture. Only the display is mirrored:
    the photo sent to the server is the true (unmirrored) image. */
 .stage video,
+.stage #live,
 .stage canvas.mirrored {
   transform: scaleX(-1);
+}
+
+/* A photo that's been taken: a camera-style flash, then a green frame, so
+   it can't be mistaken for the live view. */
+.stage #canvas {
+  box-shadow: 0 0 0 4px #4ade80;
+  animation: flash 0.5s ease-out;
+}
+
+@keyframes flash {
+  from {
+    filter: brightness(3);
+  }
+  to {
+    filter: none;
+  }
 }
 
 #status {

@@ -70,6 +70,30 @@ delete saved volunteers:
     .venv/bin/python -m app.volunteers list gallery/volunteers
     .venv/bin/python -m app.volunteers remove gallery/volunteers friend@example.com
 
+### DSLR camera
+
+A DSLR plugged in by USB takes much sharper photos than the laptop webcam.
+Tested with a Canon T3i; any camera with live view that gphoto2 supports
+should work (`gphoto2 --list-cameras` after `brew install gphoto2`).
+
+    .venv/bin/pip install gphoto2     # once
+    VOLUNTEERS_DIR=gallery/volunteers GALLERY_CSV=gallery/lfw_gallery.csv GALLERY_CACHE=data/lfw_embeddings.npz .venv/bin/uvicorn app.main:app
+
+The booth uses the DSLR automatically whenever one is plugged in and switched
+on when the page loads; otherwise it uses the webcam, as before. (Plug the
+camera in later and just reload the page. `DSLR=0` turns DSLR support off.)
+The booth and registration pages show the camera's live view so people
+can centre themselves. Take photo (or Space) fires the camera, and so
+does the camera's own shutter button. On
+connecting, the booth sets the camera to keep photos in its own memory (not
+the SD card), to save JPEG Large Fine, and to ISO Auto. The photo is
+downloaded straight into the booth's memory and never written to disk. The
+full-size photo is what's emailed.
+
+Camera tips: mode dial on **P** (or Av at the lowest f-number), flash down,
+and the lens zoomed out to its widest. If the terminal shows slow shutter
+speeds such as `1/15s`, add light: the camera logs each photo's exposure.
+
 ## Accuracy on LFW
 
     .venv/bin/python -m eval.evaluate                  # default thresholds

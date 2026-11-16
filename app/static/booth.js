@@ -68,7 +68,12 @@ async function search() {
   }
 }
 
+let finishing = false;
+
 async function finish(choice) {
+  if (finishing) return; // already sending: ignore a second tap on "Yes"
+  finishing = true;
+  statusEl.textContent = "Sending your headshot…";
   try {
     const { name, sent } = await post("/confirm", choice);
     const thanks = name ? `Thanks, ${name}!` : "Thanks!";
@@ -80,6 +85,8 @@ async function finish(choice) {
     retakeBtn.textContent = "Next person";
   } catch (err) {
     statusEl.textContent = err.message;
+  } finally {
+    finishing = false;
   }
 }
 

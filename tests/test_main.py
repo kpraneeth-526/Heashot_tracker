@@ -378,3 +378,18 @@ def test_shutdown_wipes_waiting_photos(monkeypatch):
         pending = c.app.state.pending[capture_ticket(c, jpeg_bytes())]
         assert len(pending.photo) > 0
     assert pending.photo == bytearray()
+
+
+def test_convert_heic_to_jpeg(client):
+    from pillow_heif import from_pillow
+    heic = io.BytesIO()
+    from_pillow(Image.new("RGB", (64, 48), "red")).save(heic, quality=90)
+    res = client.post("/convert", content=heic.getvalue())
+    assert res.headers["content-type"] == "image/jpeg"
+    assert Image.open(io.BytesIO(res.content)).size == (64, 48)
+
+
+def test_convert_rejects_garbage(client):
+    res = client.post("/convert", content=b"not a photo")
+    assert res.status_code == 400
+    assert "Couldn't open that file" in res.json()["detail"]

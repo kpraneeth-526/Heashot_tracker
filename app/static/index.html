@@ -4,46 +4,73 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Headshot Booth</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23e11d48' stroke-width='2'%3E%3Cpath d='M4 8h3l2-3h6l2 3h3v11H4z'/%3E%3Ccircle cx='12' cy='13' r='3.5'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/static/booth.css">
 </head>
 <body>
+  <header class="topbar">
+    <a class="brand" href="/">
+      <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+      Headshot Booth
+    </a>
+    <nav class="nav">
+      <a href="/enroll">Register</a>
+      <a href="/" aria-current="page">Booth</a>
+    </nav>
+  </header>
+
   <main>
-    <h1>Headshot Booth</h1>
+    <div class="intro">
+      <h1>Your free professional headshot</h1>
+      <ol class="steps">
+        <li><span>1</span>Take your photo</li>
+        <li><span>2</span>Confirm it's you</li>
+        <li><span>3</span>Check your email</li>
+      </ol>
+    </div>
+
     <div class="stage">
       <video id="video" autoplay playsinline muted></video>
       <canvas id="live" hidden></canvas>
       <canvas id="canvas" hidden></canvas>
-    </div>
-    <p id="status" role="status">Starting camera…</p>
-    <p id="scores" class="note" hidden></p>
-    <div class="buttons">
-      <button id="capture" disabled>Take photo <kbd>Space</kbd></button>
-      <button id="upload" class="secondary" disabled>Upload photo</button>
-      <input id="file" type="file" accept="image/*" hidden>
-      <button id="retake" hidden>Retake</button>
+      <div class="guide" aria-hidden="true"></div>
     </div>
 
-    <!-- After a photo: confirm the match, or find yourself on the roster. -->
-    <section id="confirm" hidden>
+    <div class="panel">
+      <p id="status" role="status">Starting camera…</p>
+      <p id="scores" class="note" hidden></p>
       <div class="buttons">
-        <button id="yes">Yes, that's me</button>
-        <button id="not-me" class="secondary">Not me</button>
+        <button id="capture" class="primary" disabled>Take photo <kbd>Space</kbd></button>
+        <button id="upload" class="secondary" disabled>Upload photo</button>
+        <input id="file" type="file" accept="image/*" hidden>
+        <button id="retake" class="primary" hidden>Retake</button>
       </div>
-    </section>
-    <section id="lookup" hidden>
-      <div class="fields">
-        <input id="query" type="text" placeholder="UGA ID or name" autocomplete="off">
-      </div>
-      <div id="results" class="buttons"></div>
-      <p><button id="no-roster" class="link">Not on the list? Enter your email</button></p>
-    </section>
-    <section id="manual" hidden>
-      <form id="manual-form" class="fields">
-        <input id="email" type="email" placeholder="Email" autocomplete="off">
-        <button>Send</button>
-      </form>
-    </section>
+
+      <!-- After a photo: confirm the match, or find yourself on the roster. -->
+      <section id="confirm" hidden>
+        <div class="buttons">
+          <button id="yes" class="success">Yes, that's me</button>
+          <button id="not-me" class="secondary">Not me</button>
+        </div>
+      </section>
+      <section id="lookup" hidden>
+        <div class="fields">
+          <input id="query" type="text" placeholder="UGA ID or name" autocomplete="off" aria-label="UGA ID or name">
+        </div>
+        <div id="results" class="buttons results"></div>
+        <p><button id="no-roster" class="link">Not on the list? Enter your email</button></p>
+      </section>
+      <section id="manual" hidden>
+        <form id="manual-form" class="fields">
+          <input id="email" type="email" placeholder="you@example.com" autocomplete="off" aria-label="Email">
+          <button class="primary">Send</button>
+        </form>
+      </section>
+    </div>
   </main>
+
+  <footer class="footer">Your photo is used only to email you your headshot, then deleted.</footer>
+
   <script src="/static/camera.js"></script>
   <script src="/static/booth.js"></script>
 </body>

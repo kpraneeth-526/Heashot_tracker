@@ -1,21 +1,3 @@
-"""Booth web app.
-
-    uvicorn app.main:app --reload            # empty gallery; register at /enroll
-    GALLERY_CSV=gallery/gallery.csv uvicorn app.main:app   # preload a gallery
-
-    # LFW gallery, reusing the embeddings saved by eval.evaluate (fast start)
-    GALLERY_CSV=gallery/lfw_gallery.csv GALLERY_CACHE=data/lfw_embeddings.npz \\
-        uvicorn app.main:app
-
-    # Demo mode: volunteers who tick "save" at /enroll are kept in this folder
-    # and loaded again at the next start. Without it, nothing is ever saved.
-    VOLUNTEERS_DIR=gallery/volunteers uvicorn app.main:app
-
-    # A DSLR plugged in by USB is used automatically (live view, full-size
-    # photos); without one the booth uses the webcam. DSLR=0 never looks.
-    DSLR=0 uvicorn app.main:app
-"""
-
 import os
 import secrets
 import time

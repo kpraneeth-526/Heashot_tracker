@@ -20,6 +20,7 @@ import os
 import secrets
 import time
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -86,6 +87,10 @@ async def lifespan(app: FastAPI):
             print("camera: no DSLR found, so the booth will use the webcam. Plug one in "
                   "and reload the page to use it.", flush=True)
     print(f"email: sending through {describe_server()}", flush=True)
+    # Emails go out in the background so the next person can step up while
+    # the photo uploads. SEND_IN_BACKGROUND=0 makes the screen wait instead.
+    app.state.mail_queue = (ThreadPoolExecutor(max_workers=2, thread_name_prefix="email")
+                            if os.environ.get("SEND_IN_BACKGROUND", "1") != "0" else None)
     # Show match scores on the booth screen while testing; SHOW_SCORES=0 hides them.
     app.state.show_scores = os.environ.get("SHOW_SCORES", "1") != "0"
     entries = []
@@ -107,6 +112,10 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        if app.state.mail_queue:
+            # Finish sending what students already confirmed before stopping.
+            print("email: finishing any emails still sending…", flush=True)
+            app.state.mail_queue.shutdown(wait=True)
         for pending in app.state.pending.values():
             purge(pending.photo)
         app.state.pending.clear()
@@ -330,18 +339,30 @@ def confirm(body: ConfirmRequest, request: Request):
         entry, how = GalleryEntry("", email, None), "typed email"
 
     del request.app.state.pending[body.ticket]
+    name = entry.name or None
+    if queue := request.app.state.mail_queue:
+        # Answer straight away; the email uploads while the next person steps up.
+        queue.submit(_deliver, request.app.state.audit_db, entry, pending.photo, how)
+        print(f"confirm: via {how} -> sending in the background", flush=True)
+        return {"ok": True, "name": name, "queued": True}
+    status = _deliver(request.app.state.audit_db, entry, pending.photo, how)
+    return {"ok": True, "name": name, "sent": status == "sent"}
+
+
+def _deliver(audit_db, entry: GalleryEntry, photo: bytearray, how: str) -> str:
+    """Email the photo, wipe it, and log the outcome. Returns "sent" or "failed"."""
     try:
-        send_email(entry.email, entry.name, bytes(pending.photo))
+        send_email(entry.email, entry.name, bytes(photo))
         status = "sent"
     except Exception as e:
         status = "failed"
         print(f"email: failed ({type(e).__name__})", flush=True)
     finally:
-        purge(pending.photo)
-    log_event(request.app.state.audit_db, status)
+        purge(photo)
+    log_event(audit_db, status)
     # How they were identified and whether it sent; never who they are.
     print(f"confirm: via {how} -> {status}", flush=True)
-    return {"ok": True, "name": entry.name or None, "sent": status == "sent"}
+    return status
 
 
 @app.post("/enroll")

@@ -393,3 +393,50 @@ def test_convert_rejects_garbage(client):
     res = client.post("/convert", content=b"not a photo")
     assert res.status_code == 400
     assert "Couldn't open that file" in res.json()["detail"]
+
+
+def test_email_sends_in_background(monkeypatch, isolated, capsys):
+    import threading
+    monkeypatch.setenv("SEND_IN_BACKGROUND", "1")
+    monkeypatch.delenv("GALLERY_CSV", raising=False)
+    monkeypatch.delenv("VOLUNTEERS_DIR", raising=False)
+    monkeypatch.setattr(face, "detect_faces", lambda img: [object()])
+    monkeypatch.setattr(face, "check_quality", lambda img, faces: face.Quality(
+        True, face=SimpleNamespace(normed_embedding=ADA)))
+    upload_done = threading.Event()
+
+    def slow_gmail(to, name, photo):
+        assert upload_done.wait(5)  # a slow upload, still going after the reply
+        isolated.outbox.append((to, name, photo))
+    monkeypatch.setattr(main, "send_email", slow_gmail)
+
+    photo = jpeg_bytes()
+    with TestClient(app) as c:
+        with_gallery(c)
+        ticket = capture_ticket(c, photo)
+        reply = c.post("/confirm", json={"ticket": ticket, "match": True}).json()
+        assert reply == {"ok": True, "name": "Ada Lovelace", "queued": True}
+        assert isolated.outbox == []  # the screen didn't wait for the upload
+        upload_done.set()
+    # Stopping the booth waits for emails already confirmed.
+    assert isolated.outbox == [("ada@example.edu", "Ada Lovelace", photo)]
+    assert [s for _, s in read_events(isolated.audit_db)] == ["sent"]
+    assert "confirm: via auto-match -> sent" in capsys.readouterr().out
+
+
+def test_background_email_failure_is_logged(monkeypatch, isolated):
+    monkeypatch.setenv("SEND_IN_BACKGROUND", "1")
+    monkeypatch.delenv("GALLERY_CSV", raising=False)
+    monkeypatch.delenv("VOLUNTEERS_DIR", raising=False)
+    monkeypatch.setattr(face, "detect_faces", lambda img: [object()])
+    monkeypatch.setattr(face, "check_quality", lambda img, faces: face.Quality(
+        True, face=SimpleNamespace(normed_embedding=ADA)))
+
+    def gmail_down(to, name, photo):
+        raise ConnectionError("no Wi-Fi")
+    monkeypatch.setattr(main, "send_email", gmail_down)
+    with TestClient(app) as c:
+        with_gallery(c)
+        ticket = capture_ticket(c)
+        assert c.post("/confirm", json={"ticket": ticket, "match": True}).json()["queued"]
+    assert [s for _, s in read_events(isolated.audit_db)] == ["failed"]

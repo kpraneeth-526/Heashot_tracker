@@ -75,11 +75,17 @@ async function finish(choice) {
   finishing = true;
   statusEl.textContent = "Sending your headshot…";
   try {
-    const { name, sent } = await post("/confirm", choice);
+    // queued: the booth is emailing it in the background.
+    const { name, sent, queued } = await post("/confirm", choice);
     const thanks = name ? `Thanks, ${name}!` : "Thanks!";
-    statusEl.textContent = sent
-      ? `${thanks} Your headshot is on its way to your email.`
-      : "Sorry, we couldn't send your email. Please retake your photo or ask the booth staff.";
+    if (sent || queued) {
+      // Straight back to the live camera, ready for the next person.
+      camera.reset();
+      statusEl.textContent = `${thanks} Your headshot is on its way to your email. Next person!`;
+      return;
+    }
+    statusEl.textContent =
+      "Sorry, we couldn't send your email. Please retake your photo or ask the booth staff.";
     show(null);
     ticket = null;
     retakeBtn.textContent = "Next person";
@@ -90,7 +96,7 @@ async function finish(choice) {
   }
 }
 
-setupCamera({
+const camera = setupCamera({
   endpoint: "/capture",
   describe: (body) => {
     if (!body.ok) return body.reason;

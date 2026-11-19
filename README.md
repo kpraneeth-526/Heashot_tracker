@@ -39,7 +39,11 @@ as a real booth should.
 ### Email
 
 After a student confirms who they are, the booth emails them the headshot,
-then wipes the photo from memory. Unconfirmed photos are wiped after 10
+then wipes the photo from memory. Emails go out in the background, so the
+screen says "on its way" at once and the next person can step up while the
+photo uploads; a failed email shows as `email: failed` in the terminal and
+in the audit log. Stopping the booth waits for emails still sending.
+`SEND_IN_BACKGROUND=0` makes the screen wait for each email instead. Unconfirmed photos are wiped after 10
 minutes. `audit.db` (SQLite, git-ignored) records only a timestamp and
 "sent" or "failed" for each email.
 

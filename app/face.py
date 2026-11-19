@@ -1,4 +1,4 @@
-"""Face detection and embedding using InsightFace (buffalo_l)"""
+"""Face detection and embedding using loaded InsightFace  (buffalo_l)"""
 
 import io
 import math

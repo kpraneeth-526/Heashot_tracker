@@ -397,3 +397,4 @@ async def enroll(request: Request):
     gallery = request.app.state.gallery
     add_to_gallery(gallery, GalleryEntry(name, email, photo, uga_id), quality.face.normed_embedding)
     return {"ok": True, "name": name, "saved": save, "gallery_size": len(gallery)}
+
